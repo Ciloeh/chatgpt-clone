@@ -6,8 +6,10 @@ export interface MessageType {
   conversation_id: string;
   tokens_used?: number;
   response_time_ms?: number;
+  group_id?: string;
   created_at: string;
   role: 'user' | 'assistant'; // Add the role property
+  parent_id?: string; // Add the optional parent_id property
 }
 
   

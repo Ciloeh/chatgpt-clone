@@ -14,6 +14,7 @@ import {
    faGlobe,
    faEllipsisV,
    faArrowUp,
+   faEllipsisH,
    faPaperclip,    // File Attachment Icon
    faTools         // Web Tools Icon
 } from '@fortawesome/free-solid-svg-icons';
@@ -21,29 +22,17 @@ import {
 import ReactMarkdown from 'react-markdown';
 import MessageEditor from './MessageEditor';
 import { format, isValid, parseISO } from 'date-fns';
+import { AxiosError } from 'axios';
 
 
-
-
-const groupMessagesByDate = (messages: MessageType[]) => {
+const groupMessagesByGroupId = (messages: MessageType[]) => {
    return messages.reduce((group, message) => {
-     if (!message.created_at) {
-       console.error('Missing created_at for message:', message);
-       return group;
-     }
+     const groupId = message.group_id || message.id;
  
-     const dateObj = parseISO(message.created_at);
-     if (!isValid(dateObj)) {
-       console.error('Invalid date:', message.created_at);
-       return group;
+     if (!group[groupId]) {
+       group[groupId] = [];
      }
- 
-     const date = format(dateObj, 'yyyy-MM-dd');
- 
-     if (!group[date]) {
-       group[date] = [];
-     }
-     group[date].push(message);
+     group[groupId].push(message);
      return group;
    }, {} as { [key: string]: MessageType[] });
  };
@@ -58,6 +47,7 @@ const groupMessagesByDate = (messages: MessageType[]) => {
    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
    const [selectedDate, setSelectedDate] = useState<string | null>(null);
    const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
    const [isClient, setIsClient] = useState(false);
  
    useEffect(() => {
@@ -77,10 +67,24 @@ const groupMessagesByDate = (messages: MessageType[]) => {
      fetchMessages();
    }, []);
  
+   const createNewGroup = async () => {
+     const { data, error } = await supabase.from('groups').insert({}).select();
+     if (error) {
+       console.error(error);
+       return null;
+     }
+     return data[0].id; // Return the new group ID
+   };
+ 
    const handleSendMessage = async () => {
      if (newMessage.trim()) {
+       let groupId = selectedGroupId;
+       if (!groupId) {
+         groupId = await createNewGroup(); // Create a new group if none selected
+       }
+ 
        const created_at = new Date().toISOString();
-       const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at }]).select();
+       const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at, group_id: groupId }]).select();
        if (error) {
          console.error(error);
        } else {
@@ -88,25 +92,31 @@ const groupMessagesByDate = (messages: MessageType[]) => {
          setMessages((prevMessages) => [...prevMessages, ...newMessages]);
          setNewMessage('');
  
-         // Select the newly created message automatically
          if (newMessages.length > 0) {
-           setSelectedMessageId(newMessages[0].id); // Set selectedMessageId to the new message ID
-           setSelectedDate(format(new Date(newMessages[0].created_at), 'yyyy-MM-dd')); // Set selectedDate to the new message date
+           const createdDate = parseISO(newMessages[0].created_at);
+           setSelectedMessageId(newMessages[0].id);
+           setSelectedDate(isValid(createdDate) ? format(createdDate, 'yyyy-MM-dd') : 'Invalid date');
+           setSelectedGroupId(newMessages[0].group_id || null); // Ensure valid type
          }
  
-         const chatHistory = [...messages, { role: 'user', content: newMessage, created_at }];
- 
+         const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
          const gpt3Response = await callGPT3(chatHistory);
-         if (gpt3Response) {
-           const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: gpt3Response, role: 'assistant', created_at: new Date().toISOString() }]).select();
-           if (gptError) {
-             console.error(gptError);
-           } else {
-             setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
-           }
+ 
+         const responseMessage = gpt3Response;
+         const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
+         if (gptError) {
+           console.error(gptError);
+         } else {
+           setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
          }
        }
      }
+   };
+ 
+   const handleNewGroup = () => {
+     setSelectedGroupId(null);
+     setSelectedMessageId(null);
+     setSelectedDate(null);
    };
  
    const handleEditMessage = (message: MessageType) => {
@@ -128,19 +138,24 @@ const groupMessagesByDate = (messages: MessageType[]) => {
      setSelectedDate((prevDate) => (prevDate === date ? null : date));
    };
  
+   const handleGroupClick = (groupId: string) => {
+     setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
+   };
+ 
    const handleMessageClick = (messageId: string) => {
      setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
    };
  
-   const groupedMessages = groupMessagesByDate(messages);
+   const groupedMessages = groupMessagesByGroupId(messages);
  
    if (!isClient) {
      return <div>Loading...</div>; // Temporary loading state until client-side rendering
    }
  
+ 
    return (
       <div className="relative flex h-full w-full overflow-hidden transition-colors z-0">
-         <div className="z-[21] flex-shrink-0 overflow-x-hidden bg-token-sidebar-surface-primary max-md:!w-0">
+         <div className="z-[21] flex-shrink-0 overflow-x-hidden bg-token-sidebar-surface-primary max-md:!w-0" style={{width: '260px'}}>
             <div className="h-full w-[260px]">
                <div className="flex h-full min-h-0 flex-col">
                   <div className="draggable relative h-full w-full flex-1 items-start border-white/20">
@@ -220,45 +235,50 @@ const groupMessagesByDate = (messages: MessageType[]) => {
                                  <div>
                                     {/* Group Message */}
                                     <div className="relative mt-5 first:mt-0 last:mb-5">
-                                       {Object.entries(groupedMessages).map(([date, messages]) => (
+                                
+      {Object.entries(groupedMessages).map(([groupId, messages]) => {
+        const firstUserMessage = messages.find((message) => message.role === 'user');
+        const groupDate = parseISO(groupId);
+        return (
+          <div key={groupId}>
+            <div className="sticky bg-token-sidebar-surface-primary top-0 z-20 cursor-pointer" onClick={() => handleGroupClick(groupId)}>
+              <span className="flex h-9 items-center">
+                <h3 className="px-2 text-xs font-semibold text-ellipsis overflow-hidden break-all pt-3 pb-2 text-token-text-primary">
+                  {isValid(groupDate) ? format(groupDate, 'MMMM d, yyyy') : ''}
+                </h3>
+              </span>
+            </div>
+            <ol>
+              {firstUserMessage && (
+                <li key={firstUserMessage.id} className="relative z-[15]" onClick={() => handleMessageClick(firstUserMessage.id)}>
+                  <div className="no-draggable message-item-b group-hover:bg-gray-300 group hover:bg-gray-200 hover:cursor-pointer rounded-lg active:opacity-90 bg-[var(--item-background-color)] h-9 text-sm relative transition-colors">
+                    <a className="flex items-center gap-2 p-2">
+                      <div className="relative grow overflow-hidden whitespace-nowrap" dir="auto" title={firstUserMessage.content}>
+                        {truncateContent(firstUserMessage.content)}
+                        <div className="absolute bottom-0 top-0 from-[var(--item-background-color)] to-transparent ltr:right-0 ltr:bg-gradient-to-l rtl-left-0 rtl:bg-gradient-to-r w-8 from-0% can-hover:group-hover:w-10 can-hover:group-hover:from-60%"></div>
+                      </div>
+                    </a>
+                    {/* Ellipsis button container to show on hover */}
+                    <div className="absolute bottom-0 top-0 flex items-center gap-1.5 pr-2 ltr-right-0 rtl-left-0 hidden group-hover:flex">
+                      <span>
+                        <button
+                          className="flex items-center justify-center text-token-text-secondary transition hover:text-token-text-primary radix-state-open:text-token-text-secondary bg-gray-100 p-1 rounded-full shadow-md"
+                          data-testid={`history-item-${firstUserMessage.id}-options`}
+                          type="button"
+                          aria-haspopup="menu"
+                        >
+                          <FontAwesomeIcon icon={faEllipsisH} size="lg" />
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              )}
+            </ol>
+          </div>
+        );
+      })}
 
-                                          <div key={date}>
-                                             <div className="sticky bg-token-sidebar-surface-primary top-0 z-20">
-                                                <span className="flex h-9 items-center">
-                                                   <h3 className="px-2 text-xs font-semibold text-ellipsis overflow-hidden break-all pt-3 pb-2 text-token-text-primary">
-                                                      {format(new Date(date), 'MMMM d, yyyy')}
-                                                   </h3>
-                                                </span>
-                                             </div>
-                                             <ol>
-                                                {messages.map((message) => (
-                                                   <li key={message.id} className="relative  z-[15]" onClick={() => handleMessageClick(message.id)}>
-                                                      <div className="no-draggable group rounded-lg active:opacity-90 bg-[var(--item-background-color)] h-9 text-sm relative">
-                                                         <a className="flex items-center gap-2 p-2">
-                                                            <div className="relative grow overflow-hidden whitespace-nowrap" dir="auto" title={message.content}>
-                                                               {message.content}
-                                                               <div className="absolute bottom-0 top-0 from-[var(--item-background-color)] to-transparent ltr:right-0 ltr:bg-gradient-to-l rtl:left-0 rtl:bg-gradient-to-r w-8 from-0% can-hover:group-hover:w-10 can-hover:group-hover:from-60%"></div>
-                                                            </div>
-                                                         </a>
-                                                         <div className="absolute bottom-0 top-0 items-center gap-1.5 pr-2 ltr:right-0 rtl:left-0 hidden can-hover:group-hover:flex">
-                                                            <span className="">
-                                                               <button
-                                                                  className="flex items-center justify-center text-token-text-secondary transition hover:text-token-text-primary radix-state-open:text-token-text-secondary"
-                                                                  data-testid={`history-item-${message.id}-options`}
-                                                                  type="button"
-                                                                  aria-haspopup="menu"
-                                                               >
-                                                                  <FontAwesomeIcon icon={faEllipsisV} size="lg" />
-                                                                  {/* icon here */}
-                                                               </button>
-                                                            </span>
-                                                         </div>
-                                                      </div>
-                                                   </li>
-                                                ))}
-                                             </ol>
-                                          </div>
-                                       ))}
                                     </div>
                                  </div>
                               </div>
@@ -479,7 +499,7 @@ const groupMessagesByDate = (messages: MessageType[]) => {
                         <div className="m-auto text-base px-3 md:px-4 w-full md:px-5 lg:px-4 xl:px-5">
                            <div className="mx-auto flex flex-1 gap-4 text-base md:gap-5 lg:gap-6 md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem]">
                               <div className="flex justify-center"></div>
-                              <form className="w-full">
+                              <div className="w-full">
                                  <div className="relative flex h-full max-w-full flex-1 flex-col">
                                     <div className="absolute bottom-full left-0 right-0 z-20"></div>
                                     <div className="group relative flex w-full items-center">
@@ -546,7 +566,7 @@ const groupMessagesByDate = (messages: MessageType[]) => {
                                        </div>
                                     </div>
                                  </div>
-                              </form>
+                              </div>
                            </div>
                         </div>
                         <div className="relative w-full px-2 py-2 text-center text-xs text-token-text-secondary empty:hidden md:px-[60px]">
