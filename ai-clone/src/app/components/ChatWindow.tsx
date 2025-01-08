@@ -26,7 +26,6 @@ import { format, isValid, parseISO } from 'date-fns';
 import { AxiosError } from 'axios';
 
 
-
 const ChatWindow: React.FC = () => {
    const [messages, setMessages] = useState<MessageType[]>([]);
    const [newMessage, setNewMessage] = useState('');
@@ -35,6 +34,7 @@ const ChatWindow: React.FC = () => {
    const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
    const [isClient, setIsClient] = useState(false);
+   const [originalToEditedIdMap, setOriginalToEditedIdMap] = useState<{ [key: string]: string }>({});
  
    const groupMessagesByGroupId = (messages: MessageType[]) => {
      return messages.reduce((group, message) => {
@@ -52,31 +52,26 @@ const ChatWindow: React.FC = () => {
      return content.length > length ? content.slice(0, length) + '...' : content;
    };
  
+   const fetchMessages = async () => {
+     console.log("RESULT OF MESSAGE CLICK: ", selectedMessageId);
+     const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
+     if (error) {
+       console.error(error);
+     } else {
+       setMessages(data ? (data as MessageType[]) : []);
+     }
+   };
+ 
    useEffect(() => {
      setIsClient(true); // Ensure client-side rendering
    }, []);
  
    useEffect(() => {
-     const fetchMessages = async () => {
-       const { data, error } = await supabase
-         .from('messages')
-         .select(`
-           *,
-           branches:branches!original_message_id (
-             edited_message_id (
-               *,
-               responses (*)
-             )
-           )
-         `)
-         .order('created_at', { ascending: true });
-       if (error) {
-         console.error(error);
-       } else {
-         setMessages(data ? (data as MessageType[]) : []);
-       }
-     };
+     console.log("RESULT OF MESSAGE CLICK: ", selectedMessageId);
+   }, [selectedMessageId]); // Log the updated selectedMessageId
  
+   useEffect(() => {
+     console.log("RESULT OF MESSAGE CLICK: ", selectedMessageId);
      fetchMessages();
    }, []);
  
@@ -115,8 +110,15 @@ const ChatWindow: React.FC = () => {
          const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
          const gpt3Response = await callGPT3(chatHistory);
  
-         const responseMessage = gpt3Response;
-         const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
+         // Extract the content from the GPT-3 response or error message
+         let responseMessageContent;
+         if (gpt3Response.success === false) {
+           responseMessageContent = gpt3Response.content;
+         } else {
+           responseMessageContent = gpt3Response.content || gpt3Response;
+         }
+ 
+         const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessageContent, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
          if (gptError) {
            console.error(gptError);
          } else {
@@ -133,12 +135,15 @@ const ChatWindow: React.FC = () => {
    };
  
    const handleEditMessage = async (message: MessageType) => {
+     console.log("I GOT HERE ON EDIT: ", message);
      const { data, error } = await supabase.from('messages').insert([{ content: message.content, role: message.role, created_at: new Date().toISOString(), group_id: message.group_id }]).select();
      if (error) {
        console.error(error);
      } else {
        const editedMessage = data[0] as MessageType;
        await supabase.from('branches').insert([{ original_message_id: message.id, edited_message_id: editedMessage.id }]).select();
+       console.log("Edited Message: ", editedMessage);
+       setOriginalToEditedIdMap((prevMap) => ({ ...prevMap, [message.id]: editedMessage.id }));
        setEditingMessageId(editedMessage.id);
      }
    };
@@ -159,10 +164,12 @@ const ChatWindow: React.FC = () => {
    };
  
    const handleGroupClick = (groupId: string) => {
+     console.log("I GOT HERE ON GROUP CLICK: ", groupId);
      setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
    };
  
    const handleMessageClick = (messageId: string) => {
+     console.log("I GOT HERE ON MESSAGE CLICK: ", messageId);
      setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
    };
  
@@ -386,52 +393,59 @@ const ChatWindow: React.FC = () => {
                                        </button>
                                     </div>
                                  </div>
-                                 {!selectedMessageId && (
-                                    <div className="mb-7 hidden text-center @lg/thread:block"><div className="relative inline-flex justify-center text-center text-2xl font-semibold leading-9"><h1 style={{ viewTransitionName: 'var(--vt-splash-screen-headline)' }}>What can I help with?</h1></div></div>
-                                 )}
-                                 {selectedMessageId && (
+                                 {selectedMessageId ? (
                                     <div>
-
                                        {messages
-                                          .filter((message) => message.id === selectedMessageId || message.role === 'assistant')
-                                          .map((message) => (
-                                             <div key={message.id}>
-                                                {/* User Message */}
-                                                {editingMessageId === message.id ? (
-                                                   <MessageEditor messageId={message.id} currentContent={message.content} onSave={handleSaveEditedMessage}
-                                                      onCancel={handleCancelEdit} />
-                                                ) : (
-                                                   <>
-                                                      {message.role === 'user' && (
-                                                         <article className="w-full scroll-mb-[var(--thread-trailing-height,150px)] text-token-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-4px]" dir="auto">
-                                                            <h5 className="sr-only">You said:</h5>
-                                                            <div className="m-auto text-base py-[18px] px-3 md:px-4 w-full md:px-5 lg:px-4 xl:px-5">
-                                                               <div className="mx-auto flex flex-1 gap-4 text-base md:gap-5 lg:gap-6 md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem]">
-                                                                  <div className="group/conversation-turn relative flex w-full min-w-0 flex-col">
-                                                                     <div className="flex-col gap-1 md:gap-3">
-                                                                        <div className="flex max-w-full flex-col flex-grow">
-                                                                           <div data-message-author-role="user" data-message-id="aaa29b3c-7958-4e9a-95c6-c26ccaad0398" dir="auto" className="min-h-8 text-message flex w-full flex-col items-end gap-2 whitespace-normal break-words text-start [.text-message+&amp;]:mt-5">
-                                                                              <div className="flex w-full flex-col gap-1 empty:hidden items-end rtl:items-start">
-                                                                                 <div className="relative max-w-[var(--user-chat-width,70%)] rounded-3xl bg-token-message-surface px-5 py-2.5 group">
+                                          .filter((message) => String(message.id) === String(selectedMessageId) || message.role === 'assistant')
+                                          .map((message) => {
+                                            
+                                             console.log('Message ID:', message.id);
+                                             console.log('editingMessageId:', editingMessageId);
+                                             console.log('Current Content for Editor:', message.content);
+                                             return (
+                                                <div key={message.id}>
+                                                   {/* User Message */}
+                                                   {message.role === 'user' && (editingMessageId === message.id || originalToEditedIdMap[message.id] === editingMessageId) ? ( 
+                                                      
+                                                     
+                                                      <MessageEditor messageId={message.id} 
+                                                      currentContent={message.content} 
+                                                      onSave={handleSaveEditedMessage} 
+                                                      onCancel={handleCancelEdit} /> 
+                                                
+                                                   ) : (
+                                                      <>
+                                                         {message.role === 'user' && (
+                                                            <div className="w-full scroll-mb-[var(--thread-trailing-height,150px)] text-token-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-4px]" dir="auto">
+                                                               <h5 className="sr-only">You said:</h5>
+                                                               <div className="m-auto text-base py-[18px] px-3 md:px-4 w-full md:px-5 lg:px-4 xl:px-5">
+                                                                  <div className="mx-auto flex flex-1 gap-4 text-base md:gap-5 lg:gap-6 md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem]">
+                                                                     <div className="group/conversation-turn relative flex w-full min-w-0 flex-col">
+                                                                        <div className="flex-col gap-1 md:gap-3">
+                                                                           <div className="flex max-w-full flex-col flex-grow">
+                                                                              <div data-message-author-role="user" data-message-id="aaa29b3c-7958-4e9a-95c6-c26ccaad0398" dir="auto" className="min-h-8 text-message flex w-full flex-col items-end gap-2 whitespace-normal break-words text-start [.text-message+&amp;]:mt-5">
+                                                                                 <div className="flex w-full flex-col gap-1 empty:hidden items-end rtl:items-start">
+                                                                                    <div className="relative max-w-[var(--user-chat-width,70%)] rounded-3xl bg-token-message-surface px-5 py-2.5 group">
 
-                                                                                    {/* Chat Content */}
-                                                                                    <div className="whitespace-pre-wrap">{message.content}</div>
+                                                                                       {/* Chat Content */}
+                                                                                       <div className="whitespace-pre-wrap">{message.content}</div>
 
-                                                                                    {/* Edit Icon on Hover */}
-                                                                                    <div className="absolute left-0 bottom-0 top-0 mr-6.5 hidden pr-5 pt-1 group-hover:block" style={{ left: '-3rem' }}>
-                                                                                       <span>
-                                                                                          <button
-                                                                                             onClick={() => handleEditMessage(message)}
-                                                                                             className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-token-text-secondary transition hover:bg-token-main-surface-tertiary"
-                                                                                          >
-                                                                                             <FontAwesomeIcon icon={faPencilAlt} className="text-gray-500" />
-                                                                                          </button>
-                                                                                       </span>
+                                                                                       {/* Edit Icon on Hover */}
+                                                                                       <div className="absolute left-0 bottom-0 top-0 mr-6.5 hidden pr-5 pt-1 group-hover:block" style={{ left: '-3rem' }}>
+                                                                                          <span>
+                                                                                             <button
+                                                                                                onClick={() => handleEditMessage(message)}
+                                                                                                className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-token-text-secondary transition hover:bg-token-main-surface-tertiary"
+                                                                                             >
+                                                                                                <FontAwesomeIcon icon={faPencilAlt} className="text-gray-500" />
+                                                                                             </button>
+                                                                                          </span>
+                                                                                       </div>
+
+
                                                                                     </div>
 
-
                                                                                  </div>
-
                                                                               </div>
                                                                            </div>
                                                                         </div>
@@ -439,72 +453,70 @@ const ChatWindow: React.FC = () => {
                                                                   </div>
                                                                </div>
                                                             </div>
-                                                         </article>
-                                                      )}
-                                                      {/* ChatGPT Response */}
-                                                      {message.role === 'assistant' && (
-                                                         <article className="w-full scroll-mb-[var(--thread-trailing-height,150px)] text-token-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-4px]" dir="auto">
-                                                            <h6 className="sr-only">ChatGPT said:</h6>
-                                                            <div className="m-auto text-base py-[18px] px-3 md:px-4 w-full md:px-5 lg:px-4 xl:px-5">
-                                                               <div className="mx-auto flex flex-1 gap-4 text-base md:gap-5 lg:gap-6 md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem]">
-                                                                  <div className="flex-shrink-0 flex flex-col relative items-end">
-                                                                     <div>
-                                                                        <div className="pt-0">
-                                                                           <div className="gizmo-bot-avatar flex h-8 w-8 items-center justify-center overflow-hidden rounded-full">
-                                                                              <div className="relative p-1 rounded-sm flex items-center justify-center bg-token-main-surface-primary text-token-text-primary h-8 w-8">
-                                                                                 <GptLogo />
+                                                         )}
+                                                         {/* ChatGPT Response */}
+                                                         {message.role === 'assistant' && (
+                                                            <article className="w-full scroll-mb-[var(--thread-trailing-height,150px)] text-token-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-4px]" dir="auto">
+                                                               <h6 className="sr-only">ChatGPT said:</h6>
+                                                               <div className="m-auto text-base py-[18px] px-3 md:px-4 w-full md:px-5 lg:px-4 xl:px-5">
+                                                                  <div className="mx-auto flex flex-1 gap-4 text-base md:gap-5 lg:gap-6 md:max-w-3xl lg:max-w-[40rem] xl:max-w-[48rem]">
+                                                                     <div className="flex-shrink-0 flex flex-col relative items-end">
+                                                                        <div>
+                                                                           <div className="pt-0">
+                                                                              <div className="gizmo-bot-avatar flex h-8 w-8 items-center justify-center overflow-hidden rounded-full">
+                                                                                 <div className="relative p-1 rounded-sm flex items-center justify-center bg-token-main-surface-primary text-token-text-primary h-8 w-8">
 
-                                                                                 {/* chatgpt logo */}
-                                                                              </div>
-                                                                           </div>
-                                                                        </div>
-                                                                     </div>
-                                                                  </div>
-                                                                  <div className="group/conversation-turn relative flex w-full min-w-0 flex-col agent-turn">
-                                                                     <div className="flex-col gap-1 md:gap-3">
-                                                                        <div className="flex max-w-full flex-col flex-grow">
-                                                                           <div data-message-author-role="assistant" data-message-id="2ca0996e-c8e2-4e29-954d-45ebce34a668" dir="auto" className="min-h-8 text-message flex w-full flex-col items-end gap-2 whitespace-normal break-words text-start [.text-message+&amp;]:mt-5" data-message-model-slug="gpt-4o">
-                                                                              <div className="flex w-full flex-col gap-1 empty:hidden first:pt-[3px]">
-                                                                                 <div className="markdown prose w-full break-words dark:prose-invert light">
-                                                                                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                                                                                    {/* chatgpt logo */}
                                                                                  </div>
                                                                               </div>
                                                                            </div>
                                                                         </div>
-                                                                        <div className="mb-2 flex gap-3 empty:hidden -ml-2">
-                                                                           <div className="items-center justify-start rounded-xl p-1 flex">
-                                                                              <div className="flex items-center">
-                                                                                 <span className="" data-state="closed">
-                                                                                    <button className="rounded-lg text-token-text-secondary hover:bg-token-main-surface-secondary" aria-label="Read aloud" data-testid="voice-play-turn-action-button">
-                                                                                       <span className="flex h-[30px] w-[30px] items-center justify-center">
-                                                                                          <GptLogo />
-                                                                                       </span>
-                                                                                    </button>
-                                                                                 </span>
-
+                                                                     </div>
+                                                                     <div className="group/conversation-turn relative flex w-full min-w-0 flex-col agent-turn">
+                                                                        <div className="flex-col gap-1 md:gap-3">
+                                                                           <div className="flex max-w-full flex-col flex-grow">
+                                                                              <div data-message-author-role="assistant" data-message-id="2ca0996e-c8e2-4e29-954d-45ebce34a668" dir="auto" className="min-h-8 text-message flex w-full flex-col items-end gap-2 whitespace-normal break-words text-start [.text-message+&amp;]:mt-5" data-message-model-slug="gpt-4o">
+                                                                                 <div className="flex w-full flex-col gap-1 empty:hidden first:pt-[3px]">
+                                                                                    <div className="markdown prose w-full break-words dark:prose-invert light">
+                                                                                       <ReactMarkdown>{message.content}</ReactMarkdown>
+                                                                                    </div>
+                                                                                 </div>
                                                                               </div>
                                                                            </div>
-                                                                        </div>
-                                                                        <div className="pr-2 lg:pr-0"></div>
-                                                                        <div className="mt-3 w-full empty:hidden">
-                                                                           <div className="text-center"></div>
+                                                                           <div className="mb-2 flex gap-3 empty:hidden -ml-2">
+                                                                              <div className="items-center justify-start rounded-xl p-1 flex">
+                                                                                 <div className="flex items-center">
+                                                                                    <span className="" data-state="closed">
+                                                                                       <button className="rounded-lg text-token-text-secondary hover:bg-token-main-surface-secondary" aria-label="Read aloud" data-testid="voice-play-turn-action-button">
+                                                                                          <span className="flex h-[30px] w-[30px] items-center justify-center">
+                                                                                             {/* chatGPT LOGO */}
+                                                                                          </span>
+                                                                                       </button>
+                                                                                    </span>
+
+                                                                                 </div>
+                                                                              </div>
+                                                                           </div>
+                                                                           <div className="pr-2 lg:pr-0"></div>
+                                                                           <div className="mt-3 w-full empty:hidden">
+                                                                              <div className="text-center"></div>
+                                                                           </div>
                                                                         </div>
                                                                      </div>
                                                                   </div>
                                                                </div>
-                                                            </div>
-                                                         </article>
-                                                      )}
-                                                   </>
-                                                )}
-                                                <button className="cursor-pointer absolute z-10 rounded-full bg-clip-padding border text-token-text-secondary border-token-border-light right-1/2 translate-x-1/2 bg-token-main-surface-primary w-8 h-8 flex items-center justify-center bottom-5" style={{ top: '40%' }}>
-                                                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="icon-md text-token-text-primary">
-                                                      <path fillRule="evenodd" clipRule="evenodd" d="M12 21C11.7348 21 11.4804 20.8946 11.2929 20.7071L4.29289 13.7071C3.90237 13.3166 3.90237 12.6834 4.29289 12.2929C4.68342 11.9024 5.31658 11.9024 5.70711 12.2929L11 17.5858V4C11 3.44772 11.4477 3 12 3C12.5523 3 13 3.44772 13 4V17.5858L18.2929 12.2929C18.6834 11.9024 19.3166 11.9024 19.7071 12.2929C20.0976 12.6834 20.0976 13.3166 19.7071 13.7071L12.7071 20.7071C12.5196 20.8946 12.2652 21 12 21Z" fill="currentColor"></path>
-                                                   </svg>
-                                                </button>
-                                             </div>
-                                          ))}
+                                                            </article>
+                                                         )}
+                                                      </>
+                                                   )}
+                                                </div>
+                                             );
+                                          })}
+
                                     </div>
+                                 ) : (
+                                    <div className="mb-7 hidden text-center @lg/thread:block"><div className="relative inline-flex justify-center text-center text-2xl font-semibold leading-9"><h1 style={{ viewTransitionName: 'var(--vt-splash-screen-headline)' }}>What can I help with?</h1></div></div>
+
                                  )}
 
                               </div>
