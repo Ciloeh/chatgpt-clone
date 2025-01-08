@@ -35,128 +35,143 @@ const ChatWindow: React.FC = () => {
    const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
    const [isClient, setIsClient] = useState(false);
-
-
-
+ 
    const groupMessagesByGroupId = (messages: MessageType[]) => {
-      return messages.reduce((group, message) => {
-         const groupId = message.group_id || message.id;
-   
-         if (!group[groupId]) {
-            group[groupId] = [];
-         }
-         group[groupId].push(message);
-         return group;
-      }, {} as { [key: string]: MessageType[] });
+     return messages.reduce((group, message) => {
+       const groupId = message.group_id || message.id;
+ 
+       if (!group[groupId]) {
+         group[groupId] = [];
+       }
+       group[groupId].push(message);
+       return group;
+     }, {} as { [key: string]: MessageType[] });
    };
-   
+ 
    const truncateContent = (content: string, length: number = 50) => {
-      return content.length > length ? content.slice(0, length) + '...' : content;
+     return content.length > length ? content.slice(0, length) + '...' : content;
    };
-
+ 
    useEffect(() => {
-      setIsClient(true); // Ensure client-side rendering
+     setIsClient(true); // Ensure client-side rendering
    }, []);
-
+ 
    useEffect(() => {
-      const fetchMessages = async () => {
-         const { data, error } = await supabase.from('messages').select('*');
-         if (error) {
-            console.error(error);
-         } else {
-            setMessages(data ? (data as MessageType[]) : []);
-         }
-      };
-
-      fetchMessages();
-   }, []);
-
-   const createNewGroup = async () => {
-      const { data, error } = await supabase.from('groups').insert({}).select();
-      if (error) {
+     const fetchMessages = async () => {
+       const { data, error } = await supabase
+         .from('messages')
+         .select(`
+           *,
+           branches:branches!original_message_id (
+             edited_message_id (
+               *,
+               responses (*)
+             )
+           )
+         `)
+         .order('created_at', { ascending: true });
+       if (error) {
          console.error(error);
-         return null;
-      }
-      return data[0].id; // Return the new group ID
+       } else {
+         setMessages(data ? (data as MessageType[]) : []);
+       }
+     };
+ 
+     fetchMessages();
+   }, []);
+ 
+   const createNewGroup = async () => {
+     const { data, error } = await supabase.from('groups').insert({}).select();
+     if (error) {
+       console.error(error);
+       return null;
+     }
+     return data[0].id; // Return the new group ID
    };
  
    const handleSendMessage = async () => {
-      if (newMessage.trim()) {
-         let groupId = selectedGroupId;
-         if (!groupId) {
-            groupId = await createNewGroup(); // Create a new group if none selected
+     if (newMessage.trim()) {
+       let groupId = selectedGroupId;
+       if (!groupId) {
+         groupId = await createNewGroup(); // Create a new group if none selected
+       }
+ 
+       const created_at = new Date().toISOString();
+       const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at, group_id: groupId }]).select();
+       if (error) {
+         console.error(error);
+       } else {
+         const newMessages = data ? (data as MessageType[]) : [];
+         setMessages((prevMessages) => [...prevMessages, ...newMessages]);
+         setNewMessage('');
+ 
+         if (newMessages.length > 0) {
+           const createdDate = parseISO(newMessages[0].created_at);
+           setSelectedMessageId(newMessages[0].id);
+           setSelectedDate(isValid(createdDate) ? format(createdDate, 'yyyy-MM-dd') : 'Invalid date');
+           setSelectedGroupId(newMessages[0].group_id || null); // Ensure valid type
          }
-
-         const created_at = new Date().toISOString();
-         const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at, group_id: groupId }]).select();
-         if (error) {
-            console.error(error);
+ 
+         const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
+         const gpt3Response = await callGPT3(chatHistory);
+ 
+         const responseMessage = gpt3Response;
+         const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
+         if (gptError) {
+           console.error(gptError);
          } else {
-            const newMessages = data ? (data as MessageType[]) : [];
-            setMessages((prevMessages) => [...prevMessages, ...newMessages]);
-            setNewMessage('');
-
-            if (newMessages.length > 0) {
-               const createdDate = parseISO(newMessages[0].created_at);
-               setSelectedMessageId(newMessages[0].id);
-               setSelectedDate(isValid(createdDate) ? format(createdDate, 'yyyy-MM-dd') : 'Invalid date');
-               setSelectedGroupId(newMessages[0].group_id || null); // Ensure valid type
-            }
-
-            const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
-            const gpt3Response = await callGPT3(chatHistory);
-
-            const responseMessage = gpt3Response;
-            const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
-            if (gptError) {
-               console.error(gptError);
-            } else {
-               setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
-            }
+           setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
          }
-      }
+       }
+     }
    };
-
+ 
    const handleNewGroup = () => {
-      setSelectedGroupId(null);
-      setSelectedMessageId(null);
-      setSelectedDate(null);
+     setSelectedGroupId(null);
+     setSelectedMessageId(null);
+     setSelectedDate(null);
    };
-
-   const handleEditMessage = (message: MessageType) => {
-      setEditingMessageId(message.id);
+ 
+   const handleEditMessage = async (message: MessageType) => {
+     const { data, error } = await supabase.from('messages').insert([{ content: message.content, role: message.role, created_at: new Date().toISOString(), group_id: message.group_id }]).select();
+     if (error) {
+       console.error(error);
+     } else {
+       const editedMessage = data[0] as MessageType;
+       await supabase.from('branches').insert([{ original_message_id: message.id, edited_message_id: editedMessage.id }]).select();
+       setEditingMessageId(editedMessage.id);
+     }
    };
-
+ 
    const handleSaveEditedMessage = (updatedMessage: MessageType) => {
-      setMessages((prevMessages) =>
-         prevMessages.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg))
-      );
-      setEditingMessageId(null);
+     setMessages((prevMessages) =>
+       prevMessages.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg))
+     );
+     setEditingMessageId(null);
    };
-
+ 
    const handleCancelEdit = () => {
-      setEditingMessageId(null);
+     setEditingMessageId(null);
    };
-
+ 
    const handleDateClick = (date: string) => {
-      setSelectedDate((prevDate) => (prevDate === date ? null : date));
+     setSelectedDate((prevDate) => (prevDate === date ? null : date));
    };
-
+ 
    const handleGroupClick = (groupId: string) => {
-      setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
+     setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
    };
-
+ 
    const handleMessageClick = (messageId: string) => {
-      setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
+     setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
    };
-
+ 
    const groupedMessages = groupMessagesByGroupId(messages);
-
+ 
    if (!isClient) {
-      return <div>Loading...</div>; // Temporary loading state until client-side rendering
+     return <div>Loading...</div>; // Temporary loading state until client-side rendering
    }
-
-
+ 
    return (
       <div className="relative flex h-full w-full overflow-hidden transition-colors z-0">
          <div className="z-[21] flex-shrink-0 overflow-x-hidden bg-token-sidebar-surface-primary max-md:!w-0" style={{ width: '260px' }}>
