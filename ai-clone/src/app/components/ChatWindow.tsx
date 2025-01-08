@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-html-link-for-pages */
 // src/components/ChatWindow.tsx
 "use client";
 
@@ -25,23 +26,8 @@ import { format, isValid, parseISO } from 'date-fns';
 import { AxiosError } from 'axios';
 
 
-const groupMessagesByGroupId = (messages: MessageType[]) => {
-   return messages.reduce((group, message) => {
-     const groupId = message.group_id || message.id;
- 
-     if (!group[groupId]) {
-       group[groupId] = [];
-     }
-     group[groupId].push(message);
-     return group;
-   }, {} as { [key: string]: MessageType[] });
- };
- 
- const truncateContent = (content: string, length: number = 50) => {
-   return content.length > length ? content.slice(0, length) + '...' : content;
- };
- 
- const ChatWindow: React.FC = () => {
+
+const ChatWindow: React.FC = () => {
    const [messages, setMessages] = useState<MessageType[]>([]);
    const [newMessage, setNewMessage] = useState('');
    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -49,113 +35,131 @@ const groupMessagesByGroupId = (messages: MessageType[]) => {
    const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
    const [isClient, setIsClient] = useState(false);
- 
-   useEffect(() => {
-     setIsClient(true); // Ensure client-side rendering
-   }, []);
- 
-   useEffect(() => {
-     const fetchMessages = async () => {
-       const { data, error } = await supabase.from('messages').select('*');
-       if (error) {
-         console.error(error);
-       } else {
-         setMessages(data ? (data as MessageType[]) : []);
-       }
-     };
- 
-     fetchMessages();
-   }, []);
- 
-   const createNewGroup = async () => {
-     const { data, error } = await supabase.from('groups').insert({}).select();
-     if (error) {
-       console.error(error);
-       return null;
-     }
-     return data[0].id; // Return the new group ID
-   };
- 
-   const handleSendMessage = async () => {
-     if (newMessage.trim()) {
-       let groupId = selectedGroupId;
-       if (!groupId) {
-         groupId = await createNewGroup(); // Create a new group if none selected
-       }
- 
-       const created_at = new Date().toISOString();
-       const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at, group_id: groupId }]).select();
-       if (error) {
-         console.error(error);
-       } else {
-         const newMessages = data ? (data as MessageType[]) : [];
-         setMessages((prevMessages) => [...prevMessages, ...newMessages]);
-         setNewMessage('');
- 
-         if (newMessages.length > 0) {
-           const createdDate = parseISO(newMessages[0].created_at);
-           setSelectedMessageId(newMessages[0].id);
-           setSelectedDate(isValid(createdDate) ? format(createdDate, 'yyyy-MM-dd') : 'Invalid date');
-           setSelectedGroupId(newMessages[0].group_id || null); // Ensure valid type
+
+
+
+   const groupMessagesByGroupId = (messages: MessageType[]) => {
+      return messages.reduce((group, message) => {
+         const groupId = message.group_id || message.id;
+   
+         if (!group[groupId]) {
+            group[groupId] = [];
          }
- 
-         const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
-         const gpt3Response = await callGPT3(chatHistory);
- 
-         const responseMessage = gpt3Response;
-         const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
-         if (gptError) {
-           console.error(gptError);
+         group[groupId].push(message);
+         return group;
+      }, {} as { [key: string]: MessageType[] });
+   };
+   
+   const truncateContent = (content: string, length: number = 50) => {
+      return content.length > length ? content.slice(0, length) + '...' : content;
+   };
+
+   useEffect(() => {
+      setIsClient(true); // Ensure client-side rendering
+   }, []);
+
+   useEffect(() => {
+      const fetchMessages = async () => {
+         const { data, error } = await supabase.from('messages').select('*');
+         if (error) {
+            console.error(error);
          } else {
-           setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
+            setMessages(data ? (data as MessageType[]) : []);
          }
-       }
-     }
+      };
+
+      fetchMessages();
+   }, []);
+
+   const createNewGroup = async () => {
+      const { data, error } = await supabase.from('groups').insert({}).select();
+      if (error) {
+         console.error(error);
+         return null;
+      }
+      return data[0].id; // Return the new group ID
    };
- 
+
+   const handleSendMessage = async () => {
+      if (newMessage.trim()) {
+         let groupId = selectedGroupId;
+         if (!groupId) {
+            groupId = await createNewGroup(); // Create a new group if none selected
+         }
+
+         const created_at = new Date().toISOString();
+         const { data, error } = await supabase.from('messages').insert([{ content: newMessage, role: 'user', created_at, group_id: groupId }]).select();
+         if (error) {
+            console.error(error);
+         } else {
+            const newMessages = data ? (data as MessageType[]) : [];
+            setMessages((prevMessages) => [...prevMessages, ...newMessages]);
+            setNewMessage('');
+
+            if (newMessages.length > 0) {
+               const createdDate = parseISO(newMessages[0].created_at);
+               setSelectedMessageId(newMessages[0].id);
+               setSelectedDate(isValid(createdDate) ? format(createdDate, 'yyyy-MM-dd') : 'Invalid date');
+               setSelectedGroupId(newMessages[0].group_id || null); // Ensure valid type
+            }
+
+            const chatHistory = [...messages, { role: 'user', content: newMessage, created_at, group_id: groupId }];
+            const gpt3Response = await callGPT3(chatHistory);
+
+            const responseMessage = gpt3Response;
+            const { data: gptData, error: gptError } = await supabase.from('messages').insert([{ content: responseMessage, role: 'assistant', created_at: new Date().toISOString(), group_id: groupId }]).select();
+            if (gptError) {
+               console.error(gptError);
+            } else {
+               setMessages((prevMessages) => [...prevMessages, ...(gptData as MessageType[])]);
+            }
+         }
+      }
+   };
+
    const handleNewGroup = () => {
-     setSelectedGroupId(null);
-     setSelectedMessageId(null);
-     setSelectedDate(null);
+      setSelectedGroupId(null);
+      setSelectedMessageId(null);
+      setSelectedDate(null);
    };
- 
+
    const handleEditMessage = (message: MessageType) => {
-     setEditingMessageId(message.id);
+      setEditingMessageId(message.id);
    };
- 
+
    const handleSaveEditedMessage = (updatedMessage: MessageType) => {
-     setMessages((prevMessages) =>
-       prevMessages.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg))
-     );
-     setEditingMessageId(null);
+      setMessages((prevMessages) =>
+         prevMessages.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg))
+      );
+      setEditingMessageId(null);
    };
- 
+
    const handleCancelEdit = () => {
-     setEditingMessageId(null);
+      setEditingMessageId(null);
    };
- 
+
    const handleDateClick = (date: string) => {
-     setSelectedDate((prevDate) => (prevDate === date ? null : date));
+      setSelectedDate((prevDate) => (prevDate === date ? null : date));
    };
- 
+
    const handleGroupClick = (groupId: string) => {
-     setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
+      setSelectedGroupId(groupId); // Set selectedGroupId to the clicked group ID
    };
- 
+
    const handleMessageClick = (messageId: string) => {
-     setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
+      setSelectedMessageId(messageId); // Set selectedMessageId to the clicked message ID
    };
- 
+
    const groupedMessages = groupMessagesByGroupId(messages);
- 
+
    if (!isClient) {
-     return <div>Loading...</div>; // Temporary loading state until client-side rendering
+      return <div>Loading...</div>; // Temporary loading state until client-side rendering
    }
- 
- 
+
+
    return (
       <div className="relative flex h-full w-full overflow-hidden transition-colors z-0">
-         <div className="z-[21] flex-shrink-0 overflow-x-hidden bg-token-sidebar-surface-primary max-md:!w-0" style={{width: '260px'}}>
+         <div className="z-[21] flex-shrink-0 overflow-x-hidden bg-token-sidebar-surface-primary max-md:!w-0" style={{ width: '260px' }}>
             <div className="h-full w-[260px]">
                <div className="flex h-full min-h-0 flex-col">
                   <div className="draggable relative h-full w-full flex-1 items-start border-white/20">
@@ -235,49 +239,49 @@ const groupMessagesByGroupId = (messages: MessageType[]) => {
                                  <div>
                                     {/* Group Message */}
                                     <div className="relative mt-5 first:mt-0 last:mb-5">
-                                
-      {Object.entries(groupedMessages).map(([groupId, messages]) => {
-        const firstUserMessage = messages.find((message) => message.role === 'user');
-        const groupDate = parseISO(groupId);
-        return (
-          <div key={groupId}>
-            <div className="sticky bg-token-sidebar-surface-primary top-0 z-20 cursor-pointer" onClick={() => handleGroupClick(groupId)}>
-              <span className="flex h-9 items-center">
-                <h3 className="px-2 text-xs font-semibold text-ellipsis overflow-hidden break-all pt-3 pb-2 text-token-text-primary">
-                  {isValid(groupDate) ? format(groupDate, 'MMMM d, yyyy') : ''}
-                </h3>
-              </span>
-            </div>
-            <ol>
-              {firstUserMessage && (
-                <li key={firstUserMessage.id} className="relative z-[15]" onClick={() => handleMessageClick(firstUserMessage.id)}>
-                  <div className="no-draggable message-item-b group-hover:bg-gray-300 group hover:bg-gray-200 hover:cursor-pointer rounded-lg active:opacity-90 bg-[var(--item-background-color)] h-9 text-sm relative transition-colors">
-                    <a className="flex items-center gap-2 p-2">
-                      <div className="relative grow overflow-hidden whitespace-nowrap" dir="auto" title={firstUserMessage.content}>
-                        {truncateContent(firstUserMessage.content)}
-                        <div className="absolute bottom-0 top-0 from-[var(--item-background-color)] to-transparent ltr:right-0 ltr:bg-gradient-to-l rtl-left-0 rtl:bg-gradient-to-r w-8 from-0% can-hover:group-hover:w-10 can-hover:group-hover:from-60%"></div>
-                      </div>
-                    </a>
-                    {/* Ellipsis button container to show on hover */}
-                    <div className="absolute bottom-0 top-0 flex items-center gap-1.5 pr-2 ltr-right-0 rtl-left-0 hidden group-hover:flex">
-                      <span>
-                        <button
-                          className="flex items-center justify-center text-token-text-secondary transition hover:text-token-text-primary radix-state-open:text-token-text-secondary bg-gray-100 p-1 rounded-full shadow-md"
-                          data-testid={`history-item-${firstUserMessage.id}-options`}
-                          type="button"
-                          aria-haspopup="menu"
-                        >
-                          <FontAwesomeIcon icon={faEllipsisH} size="lg" />
-                        </button>
-                      </span>
-                    </div>
-                  </div>
-                </li>
-              )}
-            </ol>
-          </div>
-        );
-      })}
+
+                                       {Object.entries(groupedMessages).map(([groupId, messages]) => {
+                                          const firstUserMessage = messages.find((message) => message.role === 'user');
+                                          const groupDate = parseISO(groupId);
+                                          return (
+                                             <div key={groupId}>
+                                                <div className="sticky bg-token-sidebar-surface-primary top-0 z-20 cursor-pointer" onClick={() => handleGroupClick(groupId)}>
+                                                   <span className="flex h-9 items-center">
+                                                      <h3 className="px-2 text-xs font-semibold text-ellipsis overflow-hidden break-all pt-3 pb-2 text-token-text-primary">
+                                                         {isValid(groupDate) ? format(groupDate, 'MMMM d, yyyy') : ''}
+                                                      </h3>
+                                                   </span>
+                                                </div>
+                                                <ol>
+                                                   {firstUserMessage && (
+                                                      <li key={firstUserMessage.id} className="relative z-[15]" onClick={() => handleMessageClick(firstUserMessage.id)}>
+                                                         <div className="no-draggable message-item-b group-hover:bg-gray-300 group hover:bg-gray-200 hover:cursor-pointer rounded-lg active:opacity-90 bg-[var(--item-background-color)] h-9 text-sm relative transition-colors">
+                                                            <a className="flex items-center gap-2 p-2">
+                                                               <div className="relative grow overflow-hidden whitespace-nowrap" dir="auto" title={firstUserMessage.content}>
+                                                                  {truncateContent(firstUserMessage.content)}
+                                                                  <div className="absolute bottom-0 top-0 from-[var(--item-background-color)] to-transparent ltr:right-0 ltr:bg-gradient-to-l rtl-left-0 rtl:bg-gradient-to-r w-8 from-0% can-hover:group-hover:w-10 can-hover:group-hover:from-60%"></div>
+                                                               </div>
+                                                            </a>
+                                                            {/* Ellipsis button container to show on hover */}
+                                                            <div className="absolute bottom-0 top-0 flex items-center gap-1.5 pr-2 ltr-right-0 rtl-left-0 hidden group-hover:flex">
+                                                               <span>
+                                                                  <button
+                                                                     className="flex items-center justify-center text-token-text-secondary transition hover:text-token-text-primary radix-state-open:text-token-text-secondary bg-gray-100 p-1 rounded-full shadow-md"
+                                                                     data-testid={`history-item-${firstUserMessage.id}-options`}
+                                                                     type="button"
+                                                                     aria-haspopup="menu"
+                                                                  >
+                                                                     <FontAwesomeIcon icon={faEllipsisH} size="lg" />
+                                                                  </button>
+                                                               </span>
+                                                            </div>
+                                                         </div>
+                                                      </li>
+                                                   )}
+                                                </ol>
+                                             </div>
+                                          );
+                                       })}
 
                                     </div>
                                  </div>
@@ -559,7 +563,7 @@ const groupMessagesByGroupId = (messages: MessageType[]) => {
                                                    </div>
                                                 </div>
                                                 <button onClick={handleSendMessage} className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:opacity-70 focus-visible:outline-none focus-visible:outline-black disabled:text-[#f4f4f4] disabled:hover:opacity-100 dark:focus-visible:outline-white disabled:dark:bg-token-text-quaternary dark:disabled:text-token-main-surface-secondary bg-black text-white dark:bg-white dark:text-black disabled:bg-[#D7D7D7]">
-                                                <FontAwesomeIcon icon={faArrowUp} size="lg" />
+                                                   <FontAwesomeIcon icon={faArrowUp} size="lg" />
                                                 </button>
                                              </div>
                                           </div>
