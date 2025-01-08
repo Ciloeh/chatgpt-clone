@@ -44,9 +44,72 @@ Login to your Supabase account and create a new project.
 Go to the "API" section in your Supabase project dashboard to find your Supabase URL and Supabase Anon Key. Add these to your .env.local file as shown above.
 
 Set up the tables in your Supabase project according to the following schema:
+Users Table
+
+id: Unique identifier for each user (UUID)
+
+username: Unique username for user login
+
+email: Unique email address for user identification
+
+password: Hashed and salted password for user authentication
+
+created_at: Timestamp of user account creation
+
+Conversations Table
+
+id: Unique identifier for each conversation (UUID)
+
+user_id: Foreign key referencing the user who initiated the conversation
+
+created_at: Timestamp of conversation creation
+
+Messages Table
+
+id: Unique identifier for each message (UUID)
+
+user_id: Foreign key referencing the user who sent the message
+
+conversation_id: Foreign key referencing the conversation the message belongs to
+
+content: Text content of the message
+
+tokens_used: Number of tokens used by the language model to generate the message (if applicable)
+
+response_time_ms: Response time of the language model in milliseconds (if applicable)
+
+created_at: Timestamp of message creation
+
+Branches Table
+
+id: Unique identifier for each message branch (UUID)
+
+original_message_id: Foreign key referencing the original message
+
+edited_message_id: Foreign key referencing the edited version of the message
+
+created_at: Timestamp of branch creation
+
+Responses Table
+
+id: Unique identifier for each response (UUID)
+
+message_id: Foreign key referencing the message being responded to
+
+content: Text content of the response
+
+created_at: Timestamp of response creation
+
+Groups Table
+
+id: Unique identifier for each group (UUID)
+
+created_at: Timestamp of group creation
+
+My Provided Schema:
+Users Table
 
 sql
--- Users Table
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
@@ -54,15 +117,17 @@ CREATE TABLE users (
     password VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+Conversations Table
 
--- Conversations Table
+sql
 CREATE TABLE conversations (
     id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+Messages Table
 
--- Messages Table
+sql
 CREATE TABLE messages (
     id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(id),
@@ -72,30 +137,33 @@ CREATE TABLE messages (
     response_time_ms INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+Branches Table
 
--- Branches Table
+sql
 CREATE TABLE branches (
     id UUID PRIMARY KEY,
     original_message_id UUID REFERENCES messages(id),
     edited_message_id UUID REFERENCES messages(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+Responses Table
 
--- Responses Table
+sql
 CREATE TABLE responses (
     id UUID PRIMARY KEY,
     message_id UUID REFERENCES messages(id),
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+Groups Table
 
--- Groups Table
+sql
 CREATE TABLE groups (
     id UUID PRIMARY KEY,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 Run the Project Locally:
-
+npm install
 bash
 npm run dev
 Access the Application:
