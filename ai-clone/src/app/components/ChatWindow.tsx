@@ -25,22 +25,6 @@ import { format, isValid, parseISO } from 'date-fns';
 import { AxiosError } from 'axios';
 
 
-const groupMessagesByGroupId = (messages: MessageType[]) => {
-   return messages.reduce((group, message) => {
-     const groupId = message.group_id || message.id;
- 
-     if (!group[groupId]) {
-       group[groupId] = [];
-     }
-     group[groupId].push(message);
-     return group;
-   }, {} as { [key: string]: MessageType[] });
- };
- 
- const truncateContent = (content: string, length: number = 50) => {
-   return content.length > length ? content.slice(0, length) + '...' : content;
- };
- 
  const ChatWindow: React.FC = () => {
    const [messages, setMessages] = useState<MessageType[]>([]);
    const [newMessage, setNewMessage] = useState('');
@@ -76,6 +60,25 @@ const groupMessagesByGroupId = (messages: MessageType[]) => {
      return data[0].id; // Return the new group ID
    };
  
+
+   const groupMessagesByGroupId = (messages: MessageType[]) => {
+      return messages.reduce((group, message) => {
+        const groupId = message.group_id || message.id;
+    
+        if (!group[groupId]) {
+          group[groupId] = [];
+        }
+        group[groupId].push(message);
+        return group;
+      }, {} as { [key: string]: MessageType[] });
+    };
+    
+    const truncateContent = (content: string, length: number = 50) => {
+      return content.length > length ? content.slice(0, length) + '...' : content;
+    };
+    
+
+
    const handleSendMessage = async () => {
      if (newMessage.trim()) {
        let groupId = selectedGroupId;
